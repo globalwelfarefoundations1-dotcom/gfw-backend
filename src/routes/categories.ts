@@ -8,6 +8,7 @@ interface CategoryRow {
   categoryName: string;
   description: string | null;
   status: string;
+  projects: number;
 }
 
 interface ListQuery {

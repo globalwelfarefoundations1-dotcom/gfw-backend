@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { FastifyInstance, FastifyRequest } from "fastify";
+import type { FastifyBaseLogger, FastifyInstance, FastifyRequest } from "fastify";
 import type { MultipartFile } from "@fastify/multipart";
 import { supabase } from "../config/supabase.js";
 import { authenticate } from "../plugins/authenticate.js";
@@ -27,6 +27,7 @@ interface CategoryValue {
 interface ProjectRow {
   id: string;
   created_at: string;
+  updatedAt: string | null;
   projectName: string;
   description: string | null;
   category: CategoryValue | Record<string, never>;
@@ -60,6 +61,7 @@ function serializeProject(row: ProjectRow) {
   return {
     id: row.id,
     created_at: row.created_at,
+    updatedAt: row.updatedAt,
     projectName: row.projectName,
     description: row.description,
     category: row.category && "id" in row.category ? row.category : null,
@@ -144,6 +146,30 @@ async function resolveCategory(categoryId: string | undefined): Promise<Category
   }
 
   return data;
+}
+
+function categoryIdOf(category: CategoryValue | Record<string, never> | null | undefined): string | undefined {
+  return category && "id" in category ? category.id : undefined;
+}
+
+async function syncCategoryProjectCount(categoryId: string, log: FastifyBaseLogger): Promise<void> {
+  try {
+    const { count, error: countError } = await supabase
+      .from(TABLE)
+      .select("id", { count: "exact", head: true })
+      .eq("category->>id", categoryId);
+
+    if (countError) throw countError;
+
+    const { error: updateError } = await supabase
+      .from("category-master")
+      .update({ projects: count ?? 0 })
+      .eq("id", categoryId);
+
+    if (updateError) throw updateError;
+  } catch (err) {
+    log.error(err, `Failed to sync project count for category ${categoryId}`);
+  }
 }
 
 async function uploadMany(
@@ -255,6 +281,7 @@ export default async function projectRoutes(server: FastifyInstance) {
         .from(TABLE)
         .insert({
           id: projectId,
+          updatedAt: new Date().toISOString(),
           projectName: fields.projectName,
           description: fields.description ?? null,
           category: category ?? {},
@@ -275,6 +302,10 @@ export default async function projectRoutes(server: FastifyInstance) {
         await removeFromStorage(uploadedPaths);
         request.log.error(error);
         return reply.code(500).send({ error: "Failed to create project" });
+      }
+
+      if (category) {
+        await syncCategoryProjectCount(category.id, request.log);
       }
 
       return reply.code(201).send(serializeProject(data));
@@ -326,6 +357,9 @@ export default async function projectRoutes(server: FastifyInstance) {
         update.category = await resolveCategory(fields.categoryId);
       }
 
+      // Server-controlled: always set on edit, never taken from the request payload.
+      update.updatedAt = new Date().toISOString();
+
       const oldPathsToRemove: string[] = [];
 
       if (form.coverImage) {
@@ -365,6 +399,16 @@ export default async function projectRoutes(server: FastifyInstance) {
 
       if (oldPathsToRemove.length > 0) {
         await removeFromStorage(oldPathsToRemove);
+      }
+
+      const categoryIdsToSync = new Set(
+        [categoryIdOf(existing.category), categoryIdOf(data.category)].filter(
+          (categoryId): categoryId is string => Boolean(categoryId)
+        )
+      );
+
+      for (const categoryId of categoryIdsToSync) {
+        await syncCategoryProjectCount(categoryId, request.log);
       }
 
       return reply.send(serializeProject(data));
@@ -411,6 +455,11 @@ export default async function projectRoutes(server: FastifyInstance) {
 
     if (pathsToRemove.length > 0) {
       await removeFromStorage(pathsToRemove);
+    }
+
+    const existingCategoryId = categoryIdOf(existing.category);
+    if (existingCategoryId) {
+      await syncCategoryProjectCount(existingCategoryId, request.log);
     }
 
     return reply.code(204).send();
