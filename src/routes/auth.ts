@@ -24,6 +24,15 @@ interface RefreshBody {
   refreshToken: string;
 }
 
+interface UpdateProfileBody {
+  fullName?: string;
+  email?: string;
+  mobileCode?: string;
+  mobileNumber?: string;
+  currentPassword?: string;
+  newPassword?: string;
+}
+
 const errorResponseSchema = {
   type: "object",
   properties: { error: { type: "string" } },
@@ -172,6 +181,110 @@ export default async function authRoutes(server: FastifyInstance) {
       }
 
       return reply.send(user);
+    }
+  );
+
+  server.put<{ Body: UpdateProfileBody }>(
+    "/api/auth/profile",
+    {
+      preHandler: authenticate,
+      schema: {
+        tags: ["Auth"],
+        security: [{ bearerAuth: [] }],
+        body: {
+          type: "object",
+          properties: {
+            fullName: { type: "string", minLength: 1 },
+            email: { type: "string" },
+            mobileCode: { type: "string" },
+            mobileNumber: { type: "string" },
+            currentPassword: { type: "string" },
+            newPassword: { type: "string", minLength: 6 },
+          },
+        },
+        response: {
+          200: {
+            type: "object",
+            properties: {
+              id: { type: "integer" },
+              created_at: { type: "string" },
+              fullName: { type: "string" },
+              email: { type: "string" },
+              mobileCode: { type: "string" },
+              mobileNumber: { type: "string" },
+              status: { type: "string" },
+            },
+          },
+          400: errorResponseSchema,
+          401: errorResponseSchema,
+          404: errorResponseSchema,
+          409: errorResponseSchema,
+          500: errorResponseSchema,
+        },
+      },
+    },
+    async (request, reply) => {
+      const { fullName, email, mobileCode, mobileNumber, currentPassword, newPassword } =
+        request.body;
+
+      const update: Record<string, unknown> = {};
+      if (fullName !== undefined) update.fullName = fullName;
+      if (email !== undefined) update.email = email;
+      if (mobileCode !== undefined) update.mobileCode = mobileCode;
+      if (mobileNumber !== undefined) update.mobileNumber = mobileNumber;
+
+      if (newPassword !== undefined) {
+        if (!currentPassword) {
+          return reply.code(400).send({ error: "currentPassword is required to set a new password" });
+        }
+
+        const { data: existing, error: fetchError } = await supabase
+          .from("admin-users")
+          .select("password")
+          .eq("id", request.user!.id)
+          .maybeSingle<{ password: string }>();
+
+        if (fetchError) {
+          request.log.error(fetchError);
+          return reply.code(500).send({ error: "Failed to fetch profile" });
+        }
+
+        if (!existing) {
+          return reply.code(404).send({ error: "User not found" });
+        }
+
+        const currentPasswordMatches = await bcrypt.compare(currentPassword, existing.password);
+        if (!currentPasswordMatches) {
+          return reply.code(401).send({ error: "Current password is incorrect" });
+        }
+
+        update.password = await bcrypt.hash(newPassword, 10);
+      }
+
+      if (Object.keys(update).length === 0) {
+        return reply.code(400).send({ error: "No fields to update" });
+      }
+
+      const { data: updated, error } = await supabase
+        .from("admin-users")
+        .update(update)
+        .eq("id", request.user!.id)
+        .select("id, created_at, fullName, email, mobileCode, mobileNumber, status")
+        .maybeSingle();
+
+      if (error) {
+        if (error.code === "23505") {
+          return reply.code(409).send({ error: "Email already in use" });
+        }
+        request.log.error(error);
+        return reply.code(500).send({ error: "Failed to update profile" });
+      }
+
+      if (!updated) {
+        return reply.code(404).send({ error: "User not found" });
+      }
+
+      return reply.send(updated);
     }
   );
 }

@@ -24,6 +24,8 @@ await server.register(cors, {
     }
     callback(new Error(`Origin ${origin} not allowed by CORS`), false);
   },
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"],
   credentials: true,
 });
 
