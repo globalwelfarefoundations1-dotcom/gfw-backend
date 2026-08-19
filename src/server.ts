@@ -8,6 +8,7 @@ import authRoutes from "./routes/auth.js";
 import categoryRoutes from "./routes/categories.js";
 import projectRoutes from "./routes/projects.js";
 
+
 const server = Fastify({ logger: true });
 
 const defaultOrigins = ["http://localhost:5173", "http://127.0.0.1:5173"];
