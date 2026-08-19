@@ -38,11 +38,35 @@ const TABLE = "category-master";
 
 const statusEnum = { type: "string", enum: ["active", "inactive"] } as const;
 
+const categorySchema = {
+  type: "object",
+  properties: {
+    id: { type: "string" },
+    created_at: { type: "string" },
+    categoryName: { type: "string" },
+    description: { type: ["string", "null"] },
+    status: { type: "string" },
+    projects: { type: "integer" },
+  },
+} as const;
+
+const errorResponseSchema = {
+  type: "object",
+  properties: { error: { type: "string" } },
+} as const;
+
+const idParamsSchema = {
+  type: "object",
+  required: ["id"],
+  properties: { id: { type: "string" } },
+} as const;
+
 export default async function categoryRoutes(server: FastifyInstance) {
   server.get<{ Querystring: ListQuery }>(
     "/api/categories",
     {
       schema: {
+        tags: ["Categories"],
         querystring: {
           type: "object",
           properties: {
@@ -51,6 +75,18 @@ export default async function categoryRoutes(server: FastifyInstance) {
             search: { type: "string" },
             status: statusEnum,
           },
+        },
+        response: {
+          200: {
+            type: "object",
+            properties: {
+              data: { type: "array", items: categorySchema },
+              total: { type: "integer" },
+              offset: { type: "integer" },
+              limit: { type: "integer" },
+            },
+          },
+          500: errorResponseSchema,
         },
       },
     },
@@ -81,30 +117,46 @@ export default async function categoryRoutes(server: FastifyInstance) {
     }
   );
 
-  server.get<{ Params: IdParams }>("/api/categories/:id", async (request, reply) => {
-    const { data, error } = await supabase
-      .from(TABLE)
-      .select("*")
-      .eq("id", request.params.id)
-      .maybeSingle<CategoryRow>();
+  server.get<{ Params: IdParams }>(
+    "/api/categories/:id",
+    {
+      schema: {
+        tags: ["Categories"],
+        params: idParamsSchema,
+        response: {
+          200: categorySchema,
+          404: errorResponseSchema,
+          500: errorResponseSchema,
+        },
+      },
+    },
+    async (request, reply) => {
+      const { data, error } = await supabase
+        .from(TABLE)
+        .select("*")
+        .eq("id", request.params.id)
+        .maybeSingle<CategoryRow>();
 
-    if (error) {
-      request.log.error(error);
-      return reply.code(500).send({ error: "Failed to fetch category" });
+      if (error) {
+        request.log.error(error);
+        return reply.code(500).send({ error: "Failed to fetch category" });
+      }
+
+      if (!data) {
+        return reply.code(404).send({ error: "Category not found" });
+      }
+
+      return reply.send(data);
     }
-
-    if (!data) {
-      return reply.code(404).send({ error: "Category not found" });
-    }
-
-    return reply.send(data);
-  });
+  );
 
   server.post<{ Body: CreateBody }>(
     "/api/categories",
     {
       preHandler: authenticate,
       schema: {
+        tags: ["Categories"],
+        security: [{ bearerAuth: [] }],
         body: {
           type: "object",
           required: ["categoryName"],
@@ -113,6 +165,10 @@ export default async function categoryRoutes(server: FastifyInstance) {
             description: { type: "string" },
             status: statusEnum,
           },
+        },
+        response: {
+          201: categorySchema,
+          500: errorResponseSchema,
         },
       },
     },
@@ -139,6 +195,9 @@ export default async function categoryRoutes(server: FastifyInstance) {
     {
       preHandler: authenticate,
       schema: {
+        tags: ["Categories"],
+        security: [{ bearerAuth: [] }],
+        params: idParamsSchema,
         body: {
           type: "object",
           properties: {
@@ -146,6 +205,11 @@ export default async function categoryRoutes(server: FastifyInstance) {
             description: { type: "string" },
             status: statusEnum,
           },
+        },
+        response: {
+          200: categorySchema,
+          404: errorResponseSchema,
+          500: errorResponseSchema,
         },
       },
     },
@@ -172,7 +236,19 @@ export default async function categoryRoutes(server: FastifyInstance) {
 
   server.delete<{ Params: IdParams }>(
     "/api/categories/:id",
-    { preHandler: authenticate },
+    {
+      preHandler: authenticate,
+      schema: {
+        tags: ["Categories"],
+        security: [{ bearerAuth: [] }],
+        params: idParamsSchema,
+        response: {
+          204: { type: "null", description: "Category deleted" },
+          404: errorResponseSchema,
+          500: errorResponseSchema,
+        },
+      },
+    },
     async (request, reply) => {
       const { data, error } = await supabase
         .from(TABLE)

@@ -38,6 +38,20 @@ await server.register(swagger, {
       description: "Backend API using Fastify and Supabase",
       version: "1.0.0",
     },
+    tags: [
+      { name: "Auth", description: "Authentication endpoints" },
+      { name: "Categories", description: "Category management" },
+      { name: "Projects", description: "Project management" },
+    ],
+    components: {
+      securitySchemes: {
+        bearerAuth: {
+          type: "http",
+          scheme: "bearer",
+          bearerFormat: "JWT",
+        },
+      },
+    },
   },
 });
 

@@ -24,11 +24,17 @@ interface RefreshBody {
   refreshToken: string;
 }
 
+const errorResponseSchema = {
+  type: "object",
+  properties: { error: { type: "string" } },
+} as const;
+
 export default async function authRoutes(server: FastifyInstance) {
   server.post<{ Body: LoginBody }>(
     "/api/auth/login",
     {
       schema: {
+        tags: ["Auth"],
         body: {
           type: "object",
           required: ["email", "password"],
@@ -36,6 +42,18 @@ export default async function authRoutes(server: FastifyInstance) {
             email: { type: "string" },
             password: { type: "string" },
           },
+        },
+        response: {
+          200: {
+            type: "object",
+            properties: {
+              accessToken: { type: "string" },
+              refreshToken: { type: "string" },
+            },
+          },
+          401: errorResponseSchema,
+          403: errorResponseSchema,
+          500: errorResponseSchema,
         },
       },
     },
@@ -80,12 +98,20 @@ export default async function authRoutes(server: FastifyInstance) {
     "/api/auth/refresh",
     {
       schema: {
+        tags: ["Auth"],
         body: {
           type: "object",
           required: ["refreshToken"],
           properties: {
             refreshToken: { type: "string" },
           },
+        },
+        response: {
+          200: {
+            type: "object",
+            properties: { accessToken: { type: "string" } },
+          },
+          401: errorResponseSchema,
         },
       },
     },
@@ -105,7 +131,30 @@ export default async function authRoutes(server: FastifyInstance) {
 
   server.get(
     "/api/auth/profile",
-    { preHandler: authenticate },
+    {
+      preHandler: authenticate,
+      schema: {
+        tags: ["Auth"],
+        security: [{ bearerAuth: [] }],
+        response: {
+          200: {
+            type: "object",
+            properties: {
+              id: { type: "integer" },
+              created_at: { type: "string" },
+              fullName: { type: "string" },
+              email: { type: "string" },
+              mobileCode: { type: "string" },
+              mobileNumber: { type: "string" },
+              status: { type: "string" },
+            },
+          },
+          401: errorResponseSchema,
+          404: errorResponseSchema,
+          500: errorResponseSchema,
+        },
+      },
+    },
     async (request, reply) => {
       const { data: user, error } = await supabase
         .from("admin-users")

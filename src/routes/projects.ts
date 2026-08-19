@@ -184,6 +184,64 @@ interface ListQuery {
   categoryId?: string;
 }
 
+const errorResponseSchema = {
+  type: "object",
+  properties: { error: { type: "string" } },
+} as const;
+
+const idParamsSchema = {
+  type: "object",
+  required: ["id"],
+  properties: { id: { type: "string" } },
+} as const;
+
+const projectSchema = {
+  type: "object",
+  properties: {
+    id: { type: "string" },
+    created_at: { type: "string" },
+    updatedAt: { type: ["string", "null"] },
+    projectName: { type: "string" },
+    description: { type: ["string", "null"] },
+    category: {
+      type: ["object", "null"],
+      properties: {
+        id: { type: "string" },
+        categoryName: { type: "string" },
+      },
+    },
+    projectDate: { type: ["string", "null"] },
+    company: { type: ["string", "null"] },
+    projectUrl: { type: ["string", "null"] },
+    services: { type: "array", items: { type: "string" } },
+    status: { type: ["string", "null"] },
+    coverImageUrl: { type: ["string", "null"] },
+    projectImages: { type: "array", items: { type: "string" } },
+    projectVideos: { type: "array", items: { type: "string" } },
+    youtubeLinks: { type: "array", items: { type: "string" } },
+  },
+} as const;
+
+// Documents the multipart text fields only (files are handled by request.parts()
+// manually, so a validating `body` schema can't cover them without breaking the upload).
+const projectFormFieldsSchema = {
+  type: "object",
+  properties: {
+    projectName: { type: "string" },
+    description: { type: "string" },
+    categoryId: { type: "string", description: "Category id to associate with the project" },
+    projectDate: { type: "string" },
+    company: { type: "string" },
+    projectUrl: { type: "string" },
+    services: { type: "string", description: "Comma-separated list" },
+    status: { type: "string" },
+    youtubeLinks: { type: "string", description: "Comma-separated list" },
+    coverImage: { type: "string", description: "File upload (PNG/JPG/SVG, max 15MB)" },
+    projectImages: { type: "string", description: "File upload(s) (PNG/JPG, max 15MB each, up to 20)" },
+    projectVideos: { type: "string", description: "File upload(s) (MP4/WebM, max 50MB each)" },
+  },
+} as const;
+
 async function uploadMany(
   projectId: string,
   folder: string,
@@ -205,6 +263,7 @@ export default async function projectRoutes(server: FastifyInstance) {
     "/api/projects",
     {
       schema: {
+        tags: ["Projects"],
         querystring: {
           type: "object",
           properties: {
@@ -214,6 +273,18 @@ export default async function projectRoutes(server: FastifyInstance) {
             status: { type: "string" },
             categoryId: { type: "string" },
           },
+        },
+        response: {
+          200: {
+            type: "object",
+            properties: {
+              data: { type: "array", items: projectSchema },
+              total: { type: "integer" },
+              offset: { type: "integer" },
+              limit: { type: "integer" },
+            },
+          },
+          500: errorResponseSchema,
         },
       },
     },
@@ -254,28 +325,59 @@ export default async function projectRoutes(server: FastifyInstance) {
     }
   );
 
-  server.get("/api/projects/:id", async (request, reply) => {
-    const { id } = request.params as { id: string };
+  server.get(
+    "/api/projects/:id",
+    {
+      schema: {
+        tags: ["Projects"],
+        params: idParamsSchema,
+        response: {
+          200: projectSchema,
+          404: errorResponseSchema,
+          500: errorResponseSchema,
+        },
+      },
+    },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
 
-    const { data, error } = await supabase
-      .from(TABLE)
-      .select("*")
-      .eq("id", id)
-      .maybeSingle<ProjectRow>();
+      const { data, error } = await supabase
+        .from(TABLE)
+        .select("*")
+        .eq("id", id)
+        .maybeSingle<ProjectRow>();
 
-    if (error) {
-      request.log.error(error);
-      return reply.code(500).send({ error: "Failed to fetch project" });
+      if (error) {
+        request.log.error(error);
+        return reply.code(500).send({ error: "Failed to fetch project" });
+      }
+
+      if (!data) {
+        return reply.code(404).send({ error: "Project not found" });
+      }
+
+      return reply.send(serializeProject(data));
     }
+  );
 
-    if (!data) {
-      return reply.code(404).send({ error: "Project not found" });
-    }
-
-    return reply.send(serializeProject(data));
-  });
-
-  server.post("/api/projects", { preHandler: authenticate }, async (request, reply) => {
+  server.post(
+    "/api/projects",
+    {
+      preHandler: authenticate,
+      schema: {
+        tags: ["Projects"],
+        security: [{ bearerAuth: [] }],
+        consumes: ["multipart/form-data"],
+        body: projectFormFieldsSchema,
+        response: {
+          201: projectSchema,
+          400: errorResponseSchema,
+          500: errorResponseSchema,
+        },
+      },
+      attachValidation: true,
+    },
+    async (request, reply) => {
     let uploadedPaths: string[] = [];
 
     try {
@@ -337,14 +439,33 @@ export default async function projectRoutes(server: FastifyInstance) {
     } catch (err) {
       await removeFromStorage(uploadedPaths);
       if (err instanceof HttpError) {
-        return reply.code(err.statusCode).send({ error: err.message });
+        return reply.code(err.statusCode as 400 | 500).send({ error: err.message });
       }
       request.log.error(err);
       return reply.code(500).send({ error: "Failed to create project" });
     }
   });
 
-  server.put("/api/projects/:id", { preHandler: authenticate }, async (request, reply) => {
+  server.put(
+    "/api/projects/:id",
+    {
+      preHandler: authenticate,
+      schema: {
+        tags: ["Projects"],
+        security: [{ bearerAuth: [] }],
+        consumes: ["multipart/form-data"],
+        params: idParamsSchema,
+        body: projectFormFieldsSchema,
+        response: {
+          200: projectSchema,
+          400: errorResponseSchema,
+          404: errorResponseSchema,
+          500: errorResponseSchema,
+        },
+      },
+      attachValidation: true,
+    },
+    async (request, reply) => {
     const { id } = request.params as { id: string };
     let newlyUploadedPaths: string[] = [];
 
@@ -440,14 +561,29 @@ export default async function projectRoutes(server: FastifyInstance) {
     } catch (err) {
       await removeFromStorage(newlyUploadedPaths);
       if (err instanceof HttpError) {
-        return reply.code(err.statusCode).send({ error: err.message });
+        return reply.code(err.statusCode as 400 | 404 | 500).send({ error: err.message });
       }
       request.log.error(err);
       return reply.code(500).send({ error: "Failed to update project" });
     }
   });
 
-  server.delete("/api/projects/:id", { preHandler: authenticate }, async (request, reply) => {
+  server.delete(
+    "/api/projects/:id",
+    {
+      preHandler: authenticate,
+      schema: {
+        tags: ["Projects"],
+        security: [{ bearerAuth: [] }],
+        params: idParamsSchema,
+        response: {
+          204: { type: "null", description: "Project deleted" },
+          404: errorResponseSchema,
+          500: errorResponseSchema,
+        },
+      },
+    },
+    async (request, reply) => {
     const { id } = request.params as { id: string };
 
     const { data: existing, error: fetchError } = await supabase
