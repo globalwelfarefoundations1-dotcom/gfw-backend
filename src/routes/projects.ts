@@ -172,6 +172,18 @@ async function syncCategoryProjectCount(categoryId: string, log: FastifyBaseLogg
   }
 }
 
+function escapeOrFilterValue(value: string): string {
+  return value.replace(/[\\"]/g, (match) => `\\${match}`);
+}
+
+interface ListQuery {
+  offset?: number;
+  limit?: number;
+  search?: string;
+  status?: string;
+  categoryId?: string;
+}
+
 async function uploadMany(
   projectId: string,
   folder: string,
@@ -189,45 +201,58 @@ async function uploadMany(
 }
 
 export default async function projectRoutes(server: FastifyInstance) {
-  server.get("/api/projects", async (request, reply) => {
-    const query = request.query as Record<string, string | undefined>;
-    const offset = Number(query.offset ?? 0);
-    const limit = Math.min(Number(query.limit ?? 10), 100);
-    const search = query.search;
-    const status = query.status;
-    const categoryId = query.categoryId;
+  server.get<{ Querystring: ListQuery }>(
+    "/api/projects",
+    {
+      schema: {
+        querystring: {
+          type: "object",
+          properties: {
+            offset: { type: "integer", minimum: 0, default: 0 },
+            limit: { type: "integer", minimum: 1, maximum: 100, default: 10 },
+            search: { type: "string" },
+            status: { type: "string" },
+            categoryId: { type: "string" },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const { offset = 0, limit = 10, search, status, categoryId } = request.query;
 
-    let dbQuery = supabase.from(TABLE).select("*", { count: "exact" });
+      let dbQuery = supabase.from(TABLE).select("*", { count: "exact" });
 
-    if (search) {
-      dbQuery = dbQuery.or(`projectName.ilike.%${search}%,company.ilike.%${search}%`);
+      if (search) {
+        const escaped = escapeOrFilterValue(search);
+        dbQuery = dbQuery.or(`projectName.ilike."%${escaped}%",company.ilike."%${escaped}%"`);
+      }
+
+      if (status) {
+        dbQuery = dbQuery.eq("status", status);
+      }
+
+      if (categoryId) {
+        dbQuery = dbQuery.eq("category->>id", categoryId);
+      }
+
+      const { data, error, count } = await dbQuery
+        .order("created_at", { ascending: false })
+        .range(offset, offset + limit - 1)
+        .returns<ProjectRow[]>();
+
+      if (error) {
+        request.log.error(error);
+        return reply.code(500).send({ error: "Failed to fetch projects" });
+      }
+
+      return reply.send({
+        data: data.map(serializeProject),
+        total: count ?? 0,
+        offset,
+        limit,
+      });
     }
-
-    if (status) {
-      dbQuery = dbQuery.eq("status", status);
-    }
-
-    if (categoryId) {
-      dbQuery = dbQuery.eq("category->>id", categoryId);
-    }
-
-    const { data, error, count } = await dbQuery
-      .order("created_at", { ascending: false })
-      .range(offset, offset + limit - 1)
-      .returns<ProjectRow[]>();
-
-    if (error) {
-      request.log.error(error);
-      return reply.code(500).send({ error: "Failed to fetch projects" });
-    }
-
-    return reply.send({
-      data: data.map(serializeProject),
-      total: count ?? 0,
-      offset,
-      limit,
-    });
-  });
+  );
 
   server.get("/api/projects/:id", async (request, reply) => {
     const { id } = request.params as { id: string };
