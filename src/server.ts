@@ -17,11 +17,9 @@ const allowedOrigins = process.env.CORS_ORIGINS
 
 await server.register(cors, {
   origin: (origin, callback) => {
-    if (!origin || allowedOrigins.includes(origin)) {
-      callback(null, true);
-      return;
-    }
-    callback(new Error(`Origin ${origin} not allowed by CORS`), false);
+    // A disallowed origin must just omit CORS headers (browser blocks it client-side),
+    // never throw — an Error here becomes a 500 on every request from that origin.
+    callback(null, !origin || allowedOrigins.includes(origin));
   },
   methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization"],
