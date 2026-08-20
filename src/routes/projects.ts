@@ -31,9 +31,9 @@ interface ProjectRow {
   services: string | null;
   status: string | null;
   coverImage: string | null;
-  projectImage: string | null;
-  projectVideos: string | null;
-  youtubeLinks: string | null;
+  projectImage: string[] | null;
+  projectVideos: string[] | null;
+  youtubeLinks: string[] | null;
 }
 
 function splitCsv(value: string | null): string[] {
@@ -42,6 +42,10 @@ function splitCsv(value: string | null): string[] {
     .split(",")
     .map((v) => v.trim())
     .filter(Boolean);
+}
+
+function nonEmptyArray(values: string[] | undefined): string[] | null {
+  return values && values.length > 0 ? values : null;
 }
 
 function isFullUrl(value: string): boolean {
@@ -79,9 +83,9 @@ function serializeProject(row: ProjectRow) {
     services: splitCsv(row.services),
     status: row.status,
     coverImageUrl: resolveMediaUrl(row.coverImage),
-    projectImages: splitCsv(row.projectImage).map((v) => resolveMediaUrl(v)!),
-    projectVideos: splitCsv(row.projectVideos).map((v) => resolveMediaUrl(v)!),
-    youtubeLinks: splitCsv(row.youtubeLinks),
+    projectImages: (row.projectImage ?? []).map((v) => resolveMediaUrl(v)!),
+    projectVideos: (row.projectVideos ?? []).map((v) => resolveMediaUrl(v)!),
+    youtubeLinks: row.youtubeLinks ?? [],
   };
 }
 
@@ -364,9 +368,9 @@ export default async function projectRoutes(server: FastifyInstance) {
             services: body.services ?? null,
             status: body.status ?? "Draft",
             coverImage: body.coverImage ?? null,
-            projectImage: (body.projectImages ?? []).join(",") || null,
-            projectVideos: (body.projectVideos ?? []).join(",") || null,
-            youtubeLinks: (body.youtubeLinks ?? []).join(",") || null,
+            projectImage: nonEmptyArray(body.projectImages),
+            projectVideos: nonEmptyArray(body.projectVideos),
+            youtubeLinks: nonEmptyArray(body.youtubeLinks),
           })
           .select("*")
           .single<ProjectRow>();
@@ -437,7 +441,7 @@ export default async function projectRoutes(server: FastifyInstance) {
         if (body.projectUrl !== undefined) update.projectUrl = body.projectUrl;
         if (body.services !== undefined) update.services = body.services;
         if (body.status !== undefined) update.status = body.status;
-        if (body.youtubeLinks !== undefined) update.youtubeLinks = body.youtubeLinks.join(",") || null;
+        if (body.youtubeLinks !== undefined) update.youtubeLinks = nonEmptyArray(body.youtubeLinks);
 
         if (body.categoryId !== undefined) {
           update.category = await resolveCategory(body.categoryId);
@@ -451,13 +455,13 @@ export default async function projectRoutes(server: FastifyInstance) {
         }
 
         if (body.projectImages !== undefined) {
-          oldPathsToRemove.push(...splitCsv(existing.projectImage).map(toStoragePath));
-          update.projectImage = body.projectImages.join(",") || null;
+          oldPathsToRemove.push(...(existing.projectImage ?? []).map(toStoragePath));
+          update.projectImage = nonEmptyArray(body.projectImages);
         }
 
         if (body.projectVideos !== undefined) {
-          oldPathsToRemove.push(...splitCsv(existing.projectVideos).map(toStoragePath));
-          update.projectVideos = body.projectVideos.join(",") || null;
+          oldPathsToRemove.push(...(existing.projectVideos ?? []).map(toStoragePath));
+          update.projectVideos = nonEmptyArray(body.projectVideos);
         }
 
         // Server-controlled: always set on edit, never taken from the request payload.
@@ -546,8 +550,8 @@ export default async function projectRoutes(server: FastifyInstance) {
 
       const pathsToRemove = [
         ...(existing.coverImage ? [toStoragePath(existing.coverImage)] : []),
-        ...splitCsv(existing.projectImage).map(toStoragePath),
-        ...splitCsv(existing.projectVideos).map(toStoragePath),
+        ...(existing.projectImage ?? []).map(toStoragePath),
+        ...(existing.projectVideos ?? []).map(toStoragePath),
       ];
 
       if (pathsToRemove.length > 0) {
