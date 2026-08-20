@@ -10,17 +10,10 @@ import projectRoutes from "./routes/projects.js";
 
 const server = Fastify({ logger: true });
 
-const defaultOrigins = ["http://localhost:5173", "http://127.0.0.1:5173"];
-const allowedOrigins = process.env.CORS_ORIGINS
-  ? process.env.CORS_ORIGINS.split(",").map((origin) => origin.trim())
-  : defaultOrigins;
-
+// Open to any origin: GET routes are public data for the website, and the
+// POST/PUT/DELETE admin routes are already gated by Bearer token auth, not origin.
 await server.register(cors, {
-  origin: (origin, callback) => {
-    // A disallowed origin must just omit CORS headers (browser blocks it client-side),
-    // never throw — an Error here becomes a 500 on every request from that origin.
-    callback(null, !origin || allowedOrigins.includes(origin));
-  },
+  origin: true,
   methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization"],
   credentials: true,
