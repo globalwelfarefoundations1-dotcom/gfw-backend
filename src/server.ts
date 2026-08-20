@@ -3,7 +3,6 @@ import Fastify from "fastify";
 import cors from "@fastify/cors";
 import swagger from "@fastify/swagger";
 import swaggerUi from "@fastify/swagger-ui";
-import multipart from "@fastify/multipart";
 import authRoutes from "./routes/auth.js";
 import categoryRoutes from "./routes/categories.js";
 import projectRoutes from "./routes/projects.js";
@@ -27,10 +26,6 @@ await server.register(cors, {
   methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization"],
   credentials: true,
-});
-
-await server.register(multipart, {
-  limits: { fileSize: 50 * 1024 * 1024 },
 });
 
 await server.register(swagger, {
